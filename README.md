@@ -1,4 +1,4 @@
-# 👁 ClaudWatch
+# 👁 ClaudeWatch
 
 > Real-time observability dashboard for **Claude Code** agent sessions.  
 > Tail local JSONL logs, calculate live costs, and visualise the Plan → Act → Observe loop — all in your browser.
@@ -118,7 +118,7 @@ npm run build      # production build → dist/
 
 ## Hook Integration
 
-Hooks let ClaudWatch show a live **"Agent is running tool…"** indicator in the UI without waiting for the next log flush.
+Hooks let ClaudeWatch show a live **"Agent is running tool…"** indicator in the UI without waiting for the next log flush.
 
 ### Automatic (via `start.sh`)
 
@@ -161,8 +161,8 @@ Add the following `hooks` block (use `claude_settings_snippet.json` as a referen
 ### Exact CLI syntax (per-session override)
 
 ```bash
-# Point hooks at a custom ClaudWatch port
-CLAUDWATCH_URL=http://localhost:4821 claude
+# Point hooks at a custom ClaudeWatch port
+CLAUDEWATCH_URL=http://localhost:4821 claude
 
 # Or pass hooks directly on the command line
 claude \

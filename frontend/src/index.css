@@ -54,6 +54,48 @@ body {
   box-shadow: 0 0 8px rgba(255, 166, 87, 0.4);
 }
 
+/* ── Agent node activity pulse ─────────────────────────────────────────────── */
+@keyframes agentPulse {
+  0%   { box-shadow: 0 0 0 0 var(--pulse-color, rgba(56, 139, 253, 0.7)); }
+  50%  { box-shadow: 0 0 0 6px var(--pulse-color, rgba(56, 139, 253, 0)); }
+  100% { box-shadow: 0 0 0 0 var(--pulse-color, rgba(56, 139, 253, 0)); }
+}
+
+.agent-pulse-blue {
+  --pulse-color: rgba(56, 139, 253, 0.65);
+  animation: agentPulse 1.6s ease-out;
+}
+.agent-pulse-purple {
+  --pulse-color: rgba(188, 140, 255, 0.65);
+  animation: agentPulse 1.6s ease-out;
+}
+.agent-pulse-green {
+  --pulse-color: rgba(63, 185, 80, 0.65);
+  animation: agentPulse 1.6s ease-out;
+}
+
+/* ReactFlow dark theme overrides */
+.react-flow__background {
+  background-color: #0d1117 !important;
+}
+.react-flow__controls-button {
+  background: #161b22 !important;
+  border-color: #21262d !important;
+  color: #8b949e !important;
+  fill: #8b949e !important;
+}
+.react-flow__controls-button:hover {
+  background: #21262d !important;
+  color: #e6edf3 !important;
+  fill: #e6edf3 !important;
+}
+.react-flow__minimap {
+  background: #161b22 !important;
+}
+.react-flow__minimap-mask {
+  fill: rgba(13, 17, 23, 0.6) !important;
+}
+
 /* Prose in message bubbles */
 .message-text pre {
   background: #0d1117;

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────────────
-#  ClaudWatch — Pre-Tool-Use Hook
+#  ClaudeWatch — Pre-Tool-Use Hook
 #
 #  Claude Code passes the hook payload as JSON on STDIN.
 #  Payload shape: { "tool_name": "...", "tool_input": {...}, "session_id": "..." }
@@ -15,8 +15,8 @@
 #    CLAUDE_PRE_TOOL_USE_HOOK="$HOME/.claude/hooks/pre_tool_use.sh" claude
 # ──────────────────────────────────────────────────────────────────────────────
 
-CLAUDWATCH_URL="${CLAUDWATCH_URL:-http://localhost:4821}"
-ENDPOINT="${CLAUDWATCH_URL}/api/hook/pre-tool-use"
+CLAUDEWATCH_URL="${CLAUDEWATCH_URL:-http://localhost:4821}"
+ENDPOINT="${CLAUDEWATCH_URL}/api/hook/pre-tool-use"
 
 # Read JSON payload from stdin (Claude Code pipes it here)
 PAYLOAD=$(cat)

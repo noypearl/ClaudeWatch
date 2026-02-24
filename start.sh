@@ -1,6 +1,6 @@
 #!/usr/bin/env bash -x
 # ──────────────────────────────────────────────────────────────────────────────
-#  ClaudWatch — One-Shot Startup Script
+#  ClaudeWatch — One-Shot Startup Script
 #  Starts the backend + frontend dev server in parallel.
 #  Usage: ./start.sh [--prod]
 # ──────────────────────────────────────────────────────────────────────────────
@@ -54,7 +54,7 @@ success "Frontend dependencies ready"
 cd "${SCRIPT_DIR}"
 
 # ── 3 & 4. Hooks — copy scripts + register in settings.json (optional) ─────────
-ENABLE_HOOKS=false  # Set to true to install hooks and register them with Claude Code
+ENABLE_HOOKS=true  # Set to true to install hooks and register them with Claude Code
 
 if [ "$ENABLE_HOOKS" = true ]; then
   info "Installing Claude Code hooks to ${CLAUDE_HOOKS_DIR}…"

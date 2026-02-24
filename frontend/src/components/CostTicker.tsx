@@ -1,4 +1,4 @@
-import { BookOpen, Cpu, Database, DollarSign, Timer } from "lucide-react";
+import { BookOpen, Cpu, Database, DollarSign, GitBranch, Timer } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { SparkPoint, Stats } from "../types";
 import { TokenSparkline } from "./TokenSparkline";
@@ -74,6 +74,13 @@ export function CostTicker({ stats, sparkPoints }: Props) {
   const totalTokens = stats.total_input_tokens + stats.total_output_tokens;
   const reset = useHourReset();
 
+  const hasSubagents = (stats.active_agent_count ?? 0) > 0 ||
+    (stats.subagent_cost ?? 0) > 0;
+
+  const combinedCost = stats.total_cost + (stats.subagent_cost ?? 0);
+  const combinedInput  = stats.total_input_tokens  + (stats.subagent_input_tokens  ?? 0);
+  const combinedOutput = stats.total_output_tokens + (stats.subagent_output_tokens ?? 0);
+
   return (
     <div className="bg-cw-surface border border-cw-border rounded-xl p-4 flex flex-col gap-3">
       {/* Cost headline */}
@@ -82,15 +89,38 @@ export function CostTicker({ stats, sparkPoints }: Props) {
           <DollarSign size={14} className="text-cw-green" />
         </div>
         <span className="text-xs font-semibold text-cw-subtle uppercase tracking-wider">
-          Session Cost
+          {hasSubagents ? "Combined Cost" : "Session Cost"}
         </span>
       </div>
 
-      <div className="flex items-baseline gap-1.5">
-        <span className="text-3xl font-bold font-mono text-cw-green">
-          ${stats.total_cost.toFixed(4)}
-        </span>
-        <span className="text-xs text-cw-subtle">USD</span>
+      {/* Main cost figure */}
+      <div className="flex flex-col gap-0.5">
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-3xl font-bold font-mono text-cw-green">
+            ${combinedCost.toFixed(4)}
+          </span>
+          <span className="text-xs text-cw-subtle">USD</span>
+        </div>
+
+        {/* Subagent cost breakdown pill (only when agents are active) */}
+        {hasSubagents && (
+          <div className="flex items-center gap-2 mt-1">
+            <div className="flex items-center gap-1.5 text-[10px] font-mono">
+              <span className="text-cw-subtle">Session</span>
+              <span className="text-cw-green">${stats.total_cost.toFixed(4)}</span>
+            </div>
+            {(stats.subagent_cost ?? 0) > 0 && (
+              <>
+                <span className="text-cw-muted opacity-40">+</span>
+                <div className="flex items-center gap-1 text-[10px] font-mono">
+                  <GitBranch size={9} className="text-cw-purple" />
+                  <span className="text-cw-subtle">Agents</span>
+                  <span className="text-cw-purple">${(stats.subagent_cost ?? 0).toFixed(4)}</span>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Token breakdown */}
@@ -98,13 +128,13 @@ export function CostTicker({ stats, sparkPoints }: Props) {
         <StatRow
           icon={BookOpen}
           label="Input tokens"
-          value={fmt(stats.total_input_tokens)}
+          value={fmt(hasSubagents ? combinedInput : stats.total_input_tokens)}
           color="text-cw-text"
         />
         <StatRow
           icon={Cpu}
           label="Output tokens"
-          value={fmt(stats.total_output_tokens)}
+          value={fmt(hasSubagents ? combinedOutput : stats.total_output_tokens)}
           color="text-cw-accent"
         />
         <StatRow
@@ -122,9 +152,28 @@ export function CostTicker({ stats, sparkPoints }: Props) {
         <StatRow
           icon={DollarSign}
           label="Total tokens"
-          value={fmt(totalTokens)}
+          value={fmt(hasSubagents ? combinedInput + combinedOutput : totalTokens)}
           color="text-cw-text"
         />
+
+        {/* Active subagent count row */}
+        {(stats.active_agent_count ?? 0) > 0 && (
+          <div className="flex items-center justify-between pt-1.5 mt-0.5 border-t border-cw-border/30">
+            <div className="flex items-center gap-2 text-cw-subtle text-xs">
+              <GitBranch size={12} />
+              Active agents
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cw-green opacity-60" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-cw-green" />
+              </span>
+              <span className="font-mono text-sm font-medium text-cw-green">
+                {stats.active_agent_count}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Rate-limit reset countdown */}

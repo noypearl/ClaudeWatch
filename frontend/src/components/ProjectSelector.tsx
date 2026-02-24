@@ -11,6 +11,7 @@ import {
   Check,
   ChevronDown,
   FolderOpen,
+  GitBranch,
   RefreshCw,
   Search,
   Zap,
@@ -23,6 +24,8 @@ interface Props {
   activeSessionId: string;
   onSwitch: (filePath: string) => Promise<void>;
   onRefresh: () => void;
+  /** IDs of projects that currently have active subagents */
+  activeAgentProjectIds?: Set<string>;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -60,6 +63,7 @@ export function ProjectSelector({
   activeSessionId,
   onSwitch,
   onRefresh,
+  activeAgentProjectIds,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -245,7 +249,7 @@ export function ProjectSelector({
 
                       {/* Name + path + stats */}
                       <div className="flex-1 min-w-0">
-                        {/* Row 1: bold project name + live dot */}
+                        {/* Row 1: bold project name + live dot + subagent badge */}
                         <div className="flex items-center gap-2">
                           <span
                             className={`text-sm font-bold truncate leading-tight
@@ -255,6 +259,12 @@ export function ProjectSelector({
                           </span>
                           {project.is_active && (
                             <LiveDot className="mt-px" />
+                          )}
+                          {activeAgentProjectIds?.has(project.project_path) && (
+                            <span className="flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-bold bg-cw-purple/15 text-cw-purple border border-cw-purple/20 flex-shrink-0">
+                              <GitBranch size={8} />
+                              agents
+                            </span>
                           )}
                         </div>
 

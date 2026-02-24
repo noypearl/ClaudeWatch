@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────────────
 #  ClaudWatch — Post-Tool-Use Hook
-#  Notifies ClaudWatch that a tool finished, switching status → "thinking"
+#  Notifies ClaudeWatch that a tool finished, switching status → "thinking"
 # ──────────────────────────────────────────────────────────────────────────────
 
-CLAUDWATCH_URL="${CLAUDWATCH_URL:-http://localhost:4821}"
-ENDPOINT="${CLAUDWATCH_URL}/api/hook/post-tool-use"
+CLAUDEWATCH_URL="${CLAUDEWATCH_URL:-http://localhost:4821}"
+ENDPOINT="${CLAUDEWATCH_URL}/api/hook/post-tool-use"
 
 PAYLOAD=$(cat)
 

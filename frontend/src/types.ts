@@ -1,5 +1,28 @@
 export type AgentStatus = "idle" | "thinking" | "tool_running";
 
+// ── Agent swarm types ────────────────────────────────────────────────────────
+
+export type AgentType = "Explore" | "Plan";
+export type AgentLifecycle = "spawning" | "running" | "complete" | "error";
+
+export interface AgentTokens {
+  input: number;
+  output: number;
+}
+
+export interface AgentInfo {
+  agent_id: string;
+  parent_id: string | null;
+  type: AgentType;
+  purpose: string;
+  status: AgentLifecycle;
+  log_tail: string[];
+  spawned_at: number;
+  file_path: string;
+  tokens: AgentTokens;
+  cost: number;
+}
+
 export interface LogEntry {
   uuid: string;
   parentUuid: string | null;
@@ -30,6 +53,11 @@ export interface Stats {
   session_id: string;
   active_file: string;
   tokens_per_second: number;
+  // Subagent aggregates
+  subagent_cost: number;
+  subagent_input_tokens: number;
+  subagent_output_tokens: number;
+  active_agent_count: number;
 }
 
 export interface Snapshot {

@@ -1,5 +1,5 @@
 """
-ClaudWatch — Real-time observability dashboard for Claude Code sessions.
+ClaudeWatch — Real-time observability dashboard for Claude Code sessions.
 Backend: FastAPI + watchdog (file-system monitor) + SSE push to frontend.
 
 Run:  uvicorn server:app --reload --port 4821
@@ -30,7 +30,7 @@ from watchdog.observers import Observer
 #  Logging
 # ─────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO, format="%(levelname)s │ %(message)s")
-log = logging.getLogger("claudwatch")
+log = logging.getLogger("claudewatch")
 
 # ─────────────────────────────────────────────
 #  Anthropic pricing  (USD per 1 M tokens)
@@ -71,6 +71,9 @@ _FALLBACK_PRICING = {"input": 3.00, "output": 15.00, "cache_write": 3.75, "cache
 def _pricing_for(model: str) -> dict[str, float]:
     """Return pricing dict for a model string, using prefix-match fallback."""
     if not model:
+        return _FALLBACK_PRICING
+    # Silently ignore synthetic/internal model identifiers used by Claude Code
+    if model.startswith("<") and model.endswith(">"):
         return _FALLBACK_PRICING
     if model in MODEL_PRICING:
         return MODEL_PRICING[model]
@@ -139,6 +142,165 @@ async def _broadcast(event: str, data: dict):
             dead.append(q)
     for q in dead:
         _subscribers.remove(q)
+
+
+# ─────────────────────────────────────────────
+#  Agent Registry — in-memory multi-agent state
+# ─────────────────────────────────────────────
+
+# agent_id → metadata dict
+AGENT_REGISTRY: dict[str, dict] = {}
+
+# Per-agent file tailers (session_id → FileTailer)
+_agent_tailers: dict[str, "FileTailer"] = {}
+
+
+def _infer_agent_type(task: str) -> str:
+    """Heuristically classify an agent's type from its task description."""
+    t = task.lower()
+    if any(w in t for w in ["explore", "search", "find", "look", "investigate", "browse", "read", "check", "scan", "examine"]):
+        return "Explore"
+    if any(w in t for w in ["plan", "design", "architect", "strategy", "outline", "analyze", "review", "assess"]):
+        return "Plan"
+    return "General"
+
+
+def _make_agent_dict(
+    agent_id: str,
+    parent_id: Optional[str] = None,
+    agent_type: str = "General",
+    purpose: str = "",
+    status: str = "spawning",
+    file_path: str = "",
+) -> dict:
+    return {
+        "agent_id": agent_id,
+        "parent_id": parent_id,
+        "type": agent_type,
+        "purpose": purpose[:300] if purpose else "",
+        "status": status,
+        "log_tail": [],
+        "spawned_at": time.time(),
+        "file_path": file_path,
+        "tokens": {"input": 0, "output": 0},
+        "cost": 0.0,
+    }
+
+
+async def _broadcast_agent_update(agent_id: str):
+    """Broadcast agent state to all SSE subscribers."""
+    agent = AGENT_REGISTRY.get(agent_id)
+    if agent:
+        await _broadcast("agent_update", agent)
+
+
+def _agents_payload() -> list[dict]:
+    return list(AGENT_REGISTRY.values())
+
+
+async def _register_task_agent(ev: dict):
+    """Register a pending subagent discovered via a Task tool_use event."""
+    tool_input = ev.get("toolInput") or {}
+    # Claude Code Task tool uses 'prompt' as the primary field;
+    # fall back to other common variants
+    task_desc = (
+        tool_input.get("prompt") or
+        tool_input.get("description") or
+        tool_input.get("task") or
+        tool_input.get("message") or
+        # Last resort: dump the whole input as a string for display
+        (", ".join(f"{k}: {v}" for k, v in tool_input.items() if isinstance(v, str))[:300])
+        if tool_input else ""
+    )
+    tool_use_id = ev.get("toolUseId", "")
+    if not tool_use_id:
+        return
+    if tool_use_id in AGENT_REGISTRY:
+        return   # already registered
+
+    agent_type = _infer_agent_type(task_desc)
+    AGENT_REGISTRY[tool_use_id] = _make_agent_dict(
+        agent_id=tool_use_id,
+        parent_id=STATE.session_id or None,
+        agent_type=agent_type,
+        purpose=task_desc,
+        status="spawning",
+    )
+    await _broadcast_agent_update(tool_use_id)
+    log.info("Registered pending subagent %s (%s): %.60s", tool_use_id, agent_type, task_desc)
+
+
+async def _drain_agent_file(agent_id: str, path: str):
+    """Read new lines from an agent's JSONL file, update log_tail and token counts."""
+    agent = AGENT_REGISTRY.get(agent_id)
+    tailer = _agent_tailers.get(agent_id)
+    if not agent or not tailer:
+        return
+
+    changed = False
+    for raw in tailer.drain():
+        try:
+            d = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+
+        # Track token usage & cost per-agent
+        if d.get("type") == "assistant":
+            msg = d.get("message", {})
+            model = msg.get("model") or ""
+            usage = msg.get("usage") or {}
+            if usage:
+                turn_cost = calc_turn_cost(model, usage)
+                agent["cost"] = agent.get("cost", 0.0) + turn_cost
+                tok = agent.setdefault("tokens", {"input": 0, "output": 0})
+                tok["input"]  += usage.get("input_tokens", 0)
+                tok["output"] += usage.get("output_tokens", 0)
+                changed = True
+
+            # Also auto-classify type from assistant model if still General
+            if agent.get("type") == "General" and model:
+                pass  # keep General unless a Task tool_use reclassifies it
+
+        # If purpose is still empty, try to read it from the first real user message
+        if not agent.get("purpose") and d.get("type") == "user":
+            msg = d.get("message", {})
+            content = msg.get("content", "")
+            # Skip synthetic tool_result messages
+            if isinstance(content, list) and any(
+                isinstance(b, dict) and b.get("type") == "tool_result" for b in content
+            ):
+                pass
+            else:
+                text = _extract_text(content).strip()
+                if len(text) > 8 and not text.startswith("<"):
+                    agent["purpose"] = text[:300]
+                    agent["type"] = _infer_agent_type(text)
+                    changed = True
+
+        # Update log tail (keep last 2 non-empty assistant text lines)
+        if d.get("type") == "assistant":
+            msg = d.get("message", {})
+            content = msg.get("content", "")
+            text_line = ""
+            if isinstance(content, str):
+                text_line = content.strip()[:120]
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        t = (block.get("text") or "").strip()
+                        if t:
+                            text_line = t[:120]
+                            break
+
+            if text_line:
+                log_tail: list = agent.setdefault("log_tail", [])
+                log_tail.append(text_line)
+                if len(log_tail) > 2:
+                    agent["log_tail"] = log_tail[-2:]
+                changed = True
+
+    if changed:
+        await _broadcast_agent_update(agent_id)
 
 
 # ─────────────────────────────────────────────
@@ -376,20 +538,75 @@ class LogHandler(FileSystemEventHandler):
             asyncio.run_coroutine_threadsafe(self._process(event.src_path), self._loop)
 
     async def _process(self, path: str):
-        if path != TAILER.path:
-            # New or newer file found → switch, reset state for new session
-            log.info("Switching to log: %s", path)
-            STATE.reset()
-            STATE.active_file = path
-            STATE.session_id = Path(path).stem
-            TAILER.set_path(path)
-            await _broadcast("session_reset", {
-                "session_id": STATE.session_id,
-                "active_file": path,
-            })
-            # Reset memory watcher so MEMORY.md for new project is re-read
-            _memory_state["path"] = ""
+        file_stem = Path(path).stem
+
+        # ── 1. Currently active main session ──────────────────────────────
+        if path == TAILER.path:
+            for raw in TAILER.drain():
+                result = parse_line(raw)
+                if result is None:
+                    continue
+                events = result if isinstance(result, list) else [result]
+                for ev in events:
+                    STATE.messages.append(ev)
+                    await _broadcast("log_entry", ev)
+                    # Detect Task tool spawning a subagent
+                    if ev.get("type") == "tool_use" and ev.get("toolName") == "Task":
+                        await _register_task_agent(ev)
+            await _broadcast("stats", _stats_payload())
             await _check_memory_update()
+            return
+
+        # ── 2. Known subagent tailer ───────────────────────────────────────
+        if file_stem in _agent_tailers:
+            await _drain_agent_file(file_stem, path)
+            await _broadcast("stats", _stats_payload())
+            return
+
+        # ── 3. Brand-new file ─────────────────────────────────────────────
+        if TAILER.path:
+            current_dir = Path(TAILER.path).parent
+            new_dir     = Path(path).parent
+            if new_dir == current_dir:
+                # Same project directory → treat as new subagent session file
+                log.info("New subagent file detected: %s", path)
+                if file_stem not in AGENT_REGISTRY:
+                    AGENT_REGISTRY[file_stem] = _make_agent_dict(
+                        agent_id=file_stem,
+                        parent_id=STATE.session_id,
+                        agent_type="General",
+                        purpose="",
+                        status="running",
+                        file_path=path,
+                    )
+                else:
+                    # Hook may have pre-registered it — just set file path & status
+                    AGENT_REGISTRY[file_stem]["file_path"] = path
+                    if AGENT_REGISTRY[file_stem].get("status") == "spawning":
+                        AGENT_REGISTRY[file_stem]["status"] = "running"
+
+                _agent_tailers[file_stem] = FileTailer(path)
+                await _drain_agent_file(file_stem, path)
+                await _broadcast_agent_update(file_stem)
+                await _broadcast("stats", _stats_payload())
+                return
+
+        # ── 4. Different directory or no main session → switch main session
+        log.info("Switching to log: %s", path)
+        # Clear the per-project agent registry when switching to a new project
+        AGENT_REGISTRY.clear()
+        _agent_tailers.clear()
+        STATE.reset()
+        STATE.active_file = path
+        STATE.session_id  = file_stem
+        TAILER.set_path(path)
+        await _broadcast("session_reset", {
+            "session_id": STATE.session_id,
+            "active_file": path,
+        })
+        # Reset memory watcher so MEMORY.md for new project is re-read
+        _memory_state["path"] = ""
+        await _check_memory_update()
 
         for raw in TAILER.drain():
             result = parse_line(raw)
@@ -399,13 +616,18 @@ class LogHandler(FileSystemEventHandler):
             for ev in events:
                 STATE.messages.append(ev)
                 await _broadcast("log_entry", ev)
+                if ev.get("type") == "tool_use" and ev.get("toolName") == "Task":
+                    await _register_task_agent(ev)
 
-        # Always push a stats update after processing
         await _broadcast("stats", _stats_payload())
 
 
 def _stats_payload() -> dict:
     tps = _tokens_per_second()
+    subagent_cost   = sum(a.get("cost", 0.0) for a in AGENT_REGISTRY.values())
+    subagent_input  = sum(a.get("tokens", {}).get("input",  0) for a in AGENT_REGISTRY.values())
+    subagent_output = sum(a.get("tokens", {}).get("output", 0) for a in AGENT_REGISTRY.values())
+    active_count    = sum(1 for a in AGENT_REGISTRY.values() if a.get("status") in ("spawning", "running"))
     return {
         "total_cost": round(STATE.total_cost, 6),
         "total_input_tokens": STATE.total_input_tokens,
@@ -417,6 +639,10 @@ def _stats_payload() -> dict:
         "session_id": STATE.session_id,
         "active_file": STATE.active_file,
         "tokens_per_second": tps,
+        "subagent_cost": round(subagent_cost, 6),
+        "subagent_input_tokens": subagent_input,
+        "subagent_output_tokens": subagent_output,
+        "active_agent_count": active_count,
     }
 
 
@@ -459,7 +685,7 @@ def _tokens_per_second(window: float = 10.0) -> float:
 # ─────────────────────────────────────────────
 #  FastAPI app
 # ─────────────────────────────────────────────
-app = FastAPI(title="ClaudWatch", version="1.0.0")
+app = FastAPI(title="ClaudeWatch", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -482,6 +708,7 @@ async def stream(request: Request):
             "data": json.dumps({
                 "stats": _stats_payload(),
                 "messages": STATE.messages[-200:],  # last 200 messages
+                "agents": _agents_payload(),
             }),
         }
         try:
@@ -509,6 +736,7 @@ async def snapshot():
     return {
         "stats": _stats_payload(),
         "messages": STATE.messages[-200:],
+        "agents": _agents_payload(),
     }
 
 
@@ -747,6 +975,7 @@ async def switch_session(payload: SwitchPayload):
     await _broadcast("snapshot", {
         "stats":    _stats_payload(),
         "messages": STATE.messages[-200:],
+        "agents":   _agents_payload(),
     })
     # 3. Check for a MEMORY.md in the new project and broadcast it
     _memory_state["path"] = ""  # force re-read on next check
@@ -795,6 +1024,91 @@ async def hook_stop():
         "current_tool": "",
     })
     return {"ok": True}
+
+
+# ── Hook: subagent lifecycle ─────────────────────
+class SubagentStartPayload(BaseModel):
+    agent_id:    str = ""   # new subagent's session ID (or any unique ID)
+    parent_id:   str = ""   # parent session ID (defaults to STATE.session_id)
+    type:        str = "General"  # Explore | Plan | General
+    task:        str = ""   # the task / goal description
+    tool_use_id: str = ""   # link to a Task tool_use block in parent JSONL
+    session_id:  str = ""   # alias for agent_id (Claude Code hook compat)
+
+
+class SubagentStopPayload(BaseModel):
+    agent_id:   str = ""
+    session_id: str = ""   # alias for agent_id
+
+
+@app.post("/api/hook/subagent-start", status_code=status.HTTP_200_OK)
+async def hook_subagent_start(payload: SubagentStartPayload):
+    """Register a newly spawned subagent and broadcast its state."""
+    # Resolve canonical agent_id
+    agent_id = payload.agent_id or payload.session_id or payload.tool_use_id
+    if not agent_id:
+        agent_id = f"agent_{int(time.time() * 1000)}"
+
+    # If a pending entry exists under the tool_use_id, promote it
+    if payload.tool_use_id and payload.tool_use_id in AGENT_REGISTRY and payload.tool_use_id != agent_id:
+        entry = AGENT_REGISTRY.pop(payload.tool_use_id)
+        entry["agent_id"] = agent_id
+        if payload.type:
+            entry["type"] = payload.type
+        if payload.task:
+            entry["purpose"] = payload.task[:300]
+        entry["status"] = "running"
+        AGENT_REGISTRY[agent_id] = entry
+    elif agent_id in AGENT_REGISTRY:
+        # Update existing entry
+        a = AGENT_REGISTRY[agent_id]
+        a["status"] = "running"
+        if payload.type:
+            a["type"] = payload.type
+        if payload.task:
+            a["purpose"] = payload.task[:300]
+    else:
+        # Create fresh entry
+        parent = payload.parent_id or STATE.session_id or None
+        AGENT_REGISTRY[agent_id] = _make_agent_dict(
+            agent_id=agent_id,
+            parent_id=parent,
+            agent_type=payload.type or _infer_agent_type(payload.task),
+            purpose=payload.task,
+            status="running",
+        )
+
+    await _broadcast_agent_update(agent_id)
+    await _broadcast("status_change", {
+        "agent_id": agent_id,
+        "type": AGENT_REGISTRY[agent_id]["type"],
+        "current_goal": AGENT_REGISTRY[agent_id]["purpose"],
+        "agent_status": STATE.agent_status,
+    })
+    log.info("Subagent started: %s (%s)", agent_id, AGENT_REGISTRY[agent_id]["type"])
+    return {"ok": True, "agent_id": agent_id}
+
+
+@app.post("/api/hook/subagent-stop", status_code=status.HTTP_200_OK)
+async def hook_subagent_stop(payload: SubagentStopPayload):
+    """Mark a subagent as complete and broadcast its final state."""
+    agent_id = payload.agent_id or payload.session_id
+    if agent_id and agent_id in AGENT_REGISTRY:
+        AGENT_REGISTRY[agent_id]["status"] = "complete"
+        await _broadcast_agent_update(agent_id)
+        log.info("Subagent stopped: %s", agent_id)
+    await _broadcast("status_change", {
+        "agent_id": agent_id,
+        "agent_status": STATE.agent_status,
+    })
+    return {"ok": True}
+
+
+# ── REST: agent registry snapshot ────────────────
+@app.get("/api/agents")
+async def get_agents():
+    """Return the current in-memory agent registry."""
+    return _agents_payload()
 
 
 # ── Serve built frontend ─────────────────────────
