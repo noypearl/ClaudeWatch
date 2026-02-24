@@ -5,6 +5,14 @@
 
 ---
 
+## Activity Tracker
+<img width="2001" height="1193" alt="activity tracker" src="https://github.com/user-attachments/assets/338631eb-bc05-40a8-863c-b173f1716f84" />
+
+## Agents Tracker
+<img width="2005" height="1197" alt="agents tracker" src="https://github.com/user-attachments/assets/21677c42-4c27-40b9-b272-3d2682336f19" />
+
+
+### NOTICE THAT CURRENTLY Agents Tracker HAS SOME BUGS, FEEL FREE TO PR / FORK AND FIX (VIBE-CODE)
 ## Features
 
 | Feature | Details |
@@ -18,6 +26,8 @@
 | **Zero Config** | One `./start.sh` installs everything and launches both servers |
 
 ---
+
+
 
 ## Architecture
 
@@ -215,7 +225,7 @@ ClaudeWatch/
 │       ├── types.ts                     # LogEntry, Stats, SparkPoint
 │       ├── index.css                    # Tailwind + custom scrollbar / prose
 │       ├── hooks/
-│       │   └── useClaudWatch.ts         # SSE state machine + auto-reconnect
+│       │   └── useClaudeWatch.ts         # SSE state machine + auto-reconnect
 │       └── components/
 │           ├── ActivityStream.tsx       # Plan-Act-Observe tree builder
 │           ├── MessageBubble.tsx        # User / assistant / tool_use / tool_result
