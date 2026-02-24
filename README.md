@@ -19,33 +19,11 @@
 
 ---
 
-## Architecture
+## Architecture Diagram
 
-```
-~/.claude/projects/**/*.jsonl   ← data source (Claude Code writes here)
-        │
-        │  watchdog (filesystem events)
-        ▼
-┌─────────────────────────┐
-│   FastAPI backend        │  :4821
-│   server.py              │──── SSE /api/stream ──────────────────────┐
-│   • FileTailer           │──── GET /api/snapshot                      │
-│   • JSONL parser         │──── POST /api/hook/pre-tool-use            │
-│   • Cost calculator      │──── POST /api/hook/post-tool-use           │
-│   • SSE broadcaster      │──── POST /api/hook/stop                    │
-└─────────────────────────┘                                             │
-                                                                        ▼
-                                                          ┌─────────────────────────┐
-                                                          │   React / Vite frontend  │  :5173
-                                                          │   • ActivityStream       │
-                                                          │   • CostTicker           │
-                                                          │   • TokenSparkline       │
-                                                          │   • StatusBadge          │
-                                                          └─────────────────────────┘
-hooks/pre_tool_use.sh  ──POST──▶  /api/hook/pre-tool-use
-hooks/post_tool_use.sh ──POST──▶  /api/hook/post-tool-use
-hooks/stop.sh          ──POST──▶  /api/hook/stop
-```
+<img width="3918" height="2742" alt="image" src="https://github.com/user-attachments/assets/7b8680f1-bd29-46c4-be0d-562cf4da2c3d" />
+
+
 
 ---
 
